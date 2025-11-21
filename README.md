@@ -142,6 +142,21 @@ Interceptor.attach(wechat.findExportByName("recv"), {
     }
 });
 
+
+Interceptor.attach(wechat.findExportByName("read"), {
+    onEnter(args) {
+        this.buf = args[1];
+        this.len = args[2].toInt32();
+    },
+    onLeave(retval) {
+        if (retval.toInt32() > 0) {
+            console.log("=== Read Data ===");
+            console.log(hexdump(this.buf, { length: retval.toInt32() }));
+        }
+    }
+});
+
+
 Interceptor.attach(wechat.findExportByName("send"), {
     onEnter(args) {
         console.log("=== Send Data ===");
@@ -154,5 +169,20 @@ Interceptor.attach(wechat.findExportByName("send"), {
         }
     }
 });
+
+Interceptor.attach(wechat.findExportByName("write"), {
+    onEnter(args) {
+        let fd = args[0].toInt32();
+        this.buf = args[1];
+        this.len = args[2].toInt32();
+        dump("WRITE", this.buf, this.len);
+    }
+});
+
+
+```
+
+找到明文
+```
 
 ```
