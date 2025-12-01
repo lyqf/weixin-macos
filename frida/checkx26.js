@@ -10,7 +10,10 @@ function checkValid(p) {
     if (!p.and(0x7).isNull()) {
         return false;
     }
-    return p.compare("0x100000000")  >= 0;
+    if (p.compare(ptr("0x600000000000")) >= 0 && p.compare(ptr("0x700000000000")) < 0) {
+        return true;
+    }
+    return false;
 }
 
 function handlePr(addr, keyword) {
@@ -21,13 +24,17 @@ function handlePr(addr, keyword) {
         onEnter(args) {
             const currentCount = counterMap.get(addr) || 0;
             counterMap.set(addr, currentCount + 1);
-            for (let i = 0; i < 30; i++) {
-                try {
-                    if (checkValid(args[i])) {
-                        const buf = args[i].readByteArray(1024)
-                        if (!buf) {
-                            continue;
-                        }
+
+            try {
+                const x26Value = this.context.x26;
+                console.log(`[!] X26 Register Value: ${x26Value}`);
+
+
+                if (checkValid(x26Value)) {
+                    console.log(`\n[+] ${addr} || X26 has a valid pointer: ${x26Value}`);
+
+                    const buf = x26Value.readByteArray(128);
+                    if (buf) {
                         let s = "";
                         const u8 = new Uint8Array(buf);
                         for (let b of u8) {
@@ -39,41 +46,28 @@ function handlePr(addr, keyword) {
                         }
 
                         if (s.includes(keyword) || keyword === "") {
-                            console.log(`\n[+] ${addr} || arg${i} ${args[i]}`);
-                            console.log(hexdump(args[i], {length: 64}));
-                            console.log(addr + "|| " + s + "\n" +
-                                Thread.backtrace(this.context, Backtracer.ACCURATE)
-                                    .map(DebugSymbol.fromAddress).join('\n'));
+                            console.log(addr + "|| X26 Read String: " + s + `${u8}`);
+                            // 打印堆栈追踪
+                            console.log(Thread.backtrace(this.context, Backtracer.ACCURATE)
+                                .map(DebugSymbol.fromAddress).join('\n'));
                         }
                     }
-                } catch (e) {
-                    console.log("Enter Error:", e);
                 }
+            } catch (e) {
+                console.log("Enter Error:", e);
             }
 
 
         },
 
         onLeave(retval) {
-            console.log(`===== ${addr} LEAVE =====`);
-            console.log(` ${addr}  Return value ${retval}`);
-            try {
-                if (checkValid(retval)) {
-                    console.log(addr + "||" + hexdump(retval, {
-                        offset: 0,
-                        length: 64
-                    }));
-                }
-
-            } catch (_) {
-            }
         }
     });
 
 }
 
 
-const prs = ["102454D74", "10247A138"]
+const prs = ["102454D74"]
 const k = "";
 for (let pr of prs) {
     handlePr(pr, k);

@@ -6,7 +6,7 @@ console.log(addrs);
 function memoGet(p) {
     p = "0x" + p;
     const idaAddr = ptr(p);
-    MemoryAccessMonitor.enable(
+    ryAccessMonitor.enable(
         {
             base: idaAddr,
             size: 0x40  // buffer 大小
