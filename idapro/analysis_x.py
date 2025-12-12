@@ -7,16 +7,13 @@ def is_printable_string(data):
     if not data:
         return False, ""
 
-    # 检查是否以null结尾
-    if data[-1] != 0:
-        return False, ""
-
     # 检查所有字符是否可打印
     result = ""
     for byte in data[:-1]:  # 排除结尾的null
         if 32 <= byte <= 126:  # 可打印ASCII
             result += chr(byte)
         else:
+            print(f"不可打印字符: {chr(byte)}")
             return False, ""
 
     return True, result
@@ -29,8 +26,7 @@ def dereference_recursive(traceMap, addr, struct_size, depth=0, max_depth=5):
     :param depth: 当前递归深度
     :param max_depth: 最大递归深度
     """
-    mapAddr = f"0x{addr:016X}"
-    print(f"mapAddr: {mapAddr}")
+    mapAddr = f"0x{addr:X}"
     traceMap[mapAddr] = {}
     if depth >= max_depth:
         print("  " * depth + f"[达到最大递归深度 {max_depth}]")
@@ -58,7 +54,7 @@ def dereference_recursive(traceMap, addr, struct_size, depth=0, max_depth=5):
 
         is_str, str_val = is_printable_string(data)
         if is_str and len(str_val) > 0:
-            data[addr][str_val] = {}
+            traceMap[mapAddr][str_val] = {}
             print(f"{indent}字符串: \"{str_val}\"")
             return
     except:
@@ -71,20 +67,23 @@ def dereference_recursive(traceMap, addr, struct_size, depth=0, max_depth=5):
 
         hex_line = indent + "  "
         ascii_line = indent + "  "
+        all_ascii_line = ""
 
         for i in range(bytes_to_show):
             if i > 0 and i % 16 == 0:
-                print(f"{hex_line}  {ascii_line}")
+                # print(f"{hex_line}  {ascii_line}")
                 hex_line = indent + "  "
                 ascii_line = indent + "  "
 
             byte = ida_bytes.get_byte(addr + i)
             hex_line += f"{byte:02X} "
             ascii_line += chr(byte) if 32 <= byte <= 126 else "."
+            all_ascii_line += chr(byte) if 32 <= byte <= 126 else "."
 
         # 打印最后一行
-        if hex_line.strip():
-            print(f"{hex_line:50}  {ascii_line}")
+        # if hex_line.strip():
+        #     print(f"{hex_line:50}  {ascii_line}")
+        print(f"地址 0x{addr:X} ascii  {all_ascii_line}")
     except Exception as e:
         print(f"{indent}读取内存失败: {e}")
         return
@@ -99,12 +98,9 @@ def dereference_recursive(traceMap, addr, struct_size, depth=0, max_depth=5):
 
             try:
                 ptr_value = ida_bytes.get_qword(cur_addr)
-                print(f"{indent}指针[{i}] @ 0x{cur_addr:X} -> 0x{ptr_value:X}")
-                if ptr_value != 0 and ptr_value != cur_addr:
-                    print(f"{indent}可能是指针，指向: 0x{ptr_value:X}")
-
-                    nextAddr = f"0x{ptr_value:016X}"
-                    print(f"nextAddr: {nextAddr}")
+                if 0X00000001019013F4 < ptr_value < 0x7FFFFFFFFFFFFFFF and ptr_value != cur_addr:
+                    print(f"{indent}指针[{i}] @ 0x{cur_addr:X} -> 0x{ptr_value:X}")
+                    nextAddr = f"0x{ptr_value:X}"
                     traceMap[mapAddr][nextAddr] = {}
                     dereference_recursive(traceMap[mapAddr], ptr_value, struct_size, depth + 1, max_depth)
 
@@ -139,6 +135,7 @@ def print_register_struct(reg_name, struct_size=64, max_depth=3):
 
     except Exception as e:
         print(f"错误: {e}")
+    print(f"{reg_name}递归分析结果:")
     print(json.dumps(traceMap, indent=4))
 
 
@@ -198,4 +195,4 @@ analyze_all_args()
 example_usage()
 """
 
-print_register_struct("X0", 64, 3)
+print_register_struct("X27", 64, 5)

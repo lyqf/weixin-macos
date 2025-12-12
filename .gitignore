@@ -4,3 +4,4 @@ __handlers__
 .DS_Store
 diaphora_batch*
 data
+.venv
