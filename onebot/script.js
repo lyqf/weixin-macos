@@ -505,7 +505,7 @@ function setReceiver() {
             const x1 = this.context.x1;
             var sender = x1.add(0x18).readUtf8String();
             var receiver = x1.add(0x30).readUtf8String();
-            var selfId = x1.add(0x48).readUtf8String();
+            var senderUser = x1.add(0x48).readUtf8String();
 
             // 3. 从 0xd0 开始处理
             var d0Pos = x1.add(0xd0);
@@ -525,16 +525,28 @@ function setReceiver() {
                 }
             }
 
+            var selfId = receiver
             var msgType = "private"
             var groupId = ""
             if (receiver.includes("@chatroom")) {
                 msgType = "group"
                 groupId = receiver
+                selfId = senderUser
+            }
+            if (sender.includes("@chatroom")) {
+                msgType = "group"
+                groupId = sender
             }
 
+            var delimiter = ":\n";
+            var index = strD0.indexOf(delimiter);
+            if (index !== -1) {
+                strD0 = strD0.substring(index + delimiter.length).trim();
+            }
             var parts = strD0.split('\u2005');
             var messages = [];
             for (let part of parts) {
+                part = part.trim();
                 if (part.startsWith("@")) {
                     messages.push({type: "at", data: {qq: selfId}});
                 } else {
@@ -544,12 +556,12 @@ function setReceiver() {
 
             send({
                 message_type: msgType,
-                user_id: sender,
-                self_id: selfId,
-                group_id: groupId,
+                user_id: senderUser, // 发送人的 ID
+                self_id: selfId, // 接收人的 ID
+                group_id: groupId, // 群 ID
                 message_id: taskIdGlobal,
                 type: "send",
-                raw: {peerUid: receiver},
+                raw: {peerUid: taskIdGlobal},
                 message: messages
             })
         },
