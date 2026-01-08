@@ -7,19 +7,21 @@ console.log("[+] WeChat base address: " + baseAddr);
 
 
 // // 触发函数地址,不同版本的地址看wechat_version 中的json文件复制过来
-var triggerFuncAddr = baseAddr.add(0x444A99C);
-var sendMessageCallbackFunc = baseAddr.add(0xEDB4678);
-var messageCallbackFunc1 = baseAddr.add(0x7f04a38);
-var messageCallbackFunc2 = baseAddr.add(0x7f04a90);
-var messageCallbackFunc3 = baseAddr.add(0x7fae030);
-var messageCallbackFunc4 = baseAddr.add(0x7f93d68);
+var sendMessageCallbackFunc = baseAddr.add(0xAA8C5B078);
+var messageCallbackFunc1 = baseAddr.add(0x7fa0b18);
+var messageCallbackFunc2 = baseAddr.add(0x7fa0b70);
+var messageCallbackFunc3 = baseAddr.add(0x804ae78);
+var messageCallbackFunc4 = baseAddr.add(0x803ac78);
 
 // 这个必须是绝对位置
 var triggerX1Payload = ptr(0x175ED6600);
-var req2bufEnterAddr = baseAddr.add(0x33EE8E8);
-var req2bufExitAddr = baseAddr.add(0x33EFA00);
-var protobufAddr = baseAddr.add(0x223EF58);
-var receiveAddr = baseAddr.add(0x23B5348);
+var triggerFuncAddr = baseAddr.add(0x448A858);
+var req2bufEnterAddr = baseAddr.add(0x34566C0);
+var req2bufExitAddr = baseAddr.add(0x34577D8);
+var protobufAddr = baseAddr.add(0x2275BFC);
+var buf2RespAddr = baseAddr.add(0x347BD44);
+// var patchProtobufAddr = baseAddr.add(0x2275BD8);
+// var protobufDeleteAddr = baseAddr.add(0x2275C14);
 
 // 触发函数X0参数地址
 var globalMessagePtr = ptr(0);
@@ -30,6 +32,8 @@ var callBackFuncAddr = ptr(0);
 var callBackFuncAddr2 = ptr(0);
 
 var sendMessageAddr = ptr(0);
+var messageAddr = ptr(0);
+var messageContentAddr = ptr(0);
 var contentAddr = ptr(0);
 var insertMsgAddr = ptr(0);
 var receiverAddr = ptr(0);
@@ -70,7 +74,8 @@ function setupSendMessageDynamic() {
     cgiAddr = Memory.alloc(128);
     callBackFuncAddr = Memory.alloc(16);
     callBackFuncAddr2 = Memory.alloc(16);
-    sendMessageAddr = Memory.alloc(512);
+    sendMessageAddr = Memory.alloc(256);
+    messageAddr = Memory.alloc(512);
     contentAddr = Memory.alloc(255);
     receiverAddr = Memory.alloc(24);
     htmlContentAddr = Memory.alloc(24);
@@ -84,6 +89,81 @@ function setupSendMessageDynamic() {
     sendMessageAddr.add(0x00).writeU64(0);
     sendMessageAddr.add(0x08).writeU64(0);
     sendMessageAddr.add(0x10).writePointer(sendMessageCallbackFunc); // 虚表地址通常仍需硬编码或从模块基址计算
+    sendMessageAddr.add(0x18).writeU64(1);
+    sendMessageAddr.add(0x20).writeU32(taskIdGlobal);
+    sendMessageAddr.add(0x28).writePointer(messageAddr); // 指向动态分配的 Message
+
+    console.log(" [+] sendMessageAddr Object: ", hexdump(sendMessageAddr, {
+        offset: 0,
+        length: 48,
+        header: true,
+        ansi: true
+    }));
+
+    // C. 构建 Message 结构体
+    messageAddr.add(0x00).writePointer(messageCallbackFunc1);
+    messageAddr.add(0x08).writeU32(taskIdGlobal);
+    messageAddr.add(0x0c).writeU32(0x6e);
+    messageAddr.add(0x10).writeU64(0x3);
+    messageAddr.add(0x18).writePointer(cgiAddr);
+
+    // 设置一些固定值
+    messageAddr.add(0x20).writeU64(uint64("0x20"));
+    messageAddr.add(0x28).writeU64(uint64("0x8000000000000030"));
+    messageAddr.add(0x30).writeU64(uint64("0x0000000001010100"));
+    messageAddr.add(0x58).writeU64(uint64("0x0101010100000001"));
+
+    // 处理回调地址
+    callBackFuncAddr.writePointer(messageCallbackFunc2);
+    messageAddr.add(0x98).writePointer(callBackFuncAddr);
+
+    // 设置内容指针
+    messageAddr.add(0xb8).writePointer(messageCallbackFunc3);
+    callBackFuncAddr2.writePointer(messageCallbackFunc4);
+    messageAddr.add(0xc0).writePointer(callBackFuncAddr2);
+
+
+    console.log(" [+] messageAddr Object: ", hexdump(messageAddr, {
+        offset: 0,
+        length: 64,
+        header: true,
+        ansi: true
+    }));
+
+    console.log(" [+] Dynamic Memory Setup Complete. - Message Object: " + messageAddr);
+}
+
+setImmediate(setupSendMessageDynamic);
+
+// 辅助函数：写入 Hex 字符串
+function patchHex(addr, hexStr) {
+    const bytes = hexStr.split(' ').map(h => parseInt(h, 16));
+    addr.writeByteArray(bytes);
+    addr.add(bytes.length).writeU8(0); // 终止符
+}
+
+// 初始化进行内存的分配
+function setupSendMessageDynamic() {
+    console.log("[+] Starting Dynamic Message Patching...");
+
+    // 1. 动态分配内存块（按需分配大小）
+    // 分配原则：字符串给 64-128 字节，结构体按实际大小分配
+    cgiAddr = Memory.alloc(128);
+    callBackFuncAddr = Memory.alloc(16);
+    sendMessageAddr = Memory.alloc(256);
+    messageAddr = Memory.alloc(256);
+    contentAddr = Memory.alloc(255);
+    receiverAddr = Memory.alloc(24);
+
+
+    // A. 写入字符串内容
+    patchHex(cgiAddr, "2F 63 67 69 2D 62 69 6E 2F 6D 69 63 72 6F 6D 73 67 2D 62 69 6E 2F 6E 65 77 73 65 6E 64 6D 73 67");
+    patchHex(contentAddr, " ");
+
+    // B. 构建 SendMessage 结构体 (X24 基址位置)
+    sendMessageAddr.add(0x00).writeU64(0);
+    sendMessageAddr.add(0x08).writeU64(0);
+    sendMessageAddr.add(0x10).writePointer(sendMessageCallbackFunc);
     sendMessageAddr.add(0x18).writeU64(1);
     sendMessageAddr.add(0x20).writeU32(taskIdGlobal);
     sendMessageAddr.add(0x28).writePointer(messageAddr); // 指向动态分配的 Message
@@ -114,11 +194,12 @@ function setupSendMessageDynamic() {
 
     // 设置内容指针
     messageAddr.add(0xb8).writePointer(messageCallbackFunc3);
-    callBackFuncAddr2.writePointer(messageCallbackFunc4);
-    messageAddr.add(0xc0).writePointer(callBackFuncAddr2);
-
-
-
+    messageAddr.add(0xc0).writePointer(messageContentAddr);
+    messageAddr.add(0xc8).writeU64(uint64("0x0000000100000001"));
+    messageAddr.add(0xd0).writeU64(0x4);
+    messageAddr.add(0xd8).writeU64(0x1);
+    messageAddr.add(0xe0).writeU64(0x1);
+    messageAddr.add(0xe8).writePointer(messageCallbackFunc4);
 
     console.log(" [+] messageAddr Object: ", hexdump(messageAddr, {
         offset: 0,
@@ -127,43 +208,34 @@ function setupSendMessageDynamic() {
         ansi: true
     }));
 
-    console.log(" [+] Dynamic Memory Setup Complete. - Message Object: " + messageAddr);
+    console.log("[+] Dynamic Memory Setup Complete. - Message Object: " + messageAddr);
 }
 
 setImmediate(setupSendMessageDynamic);
 
-// 设置trigger函数的x0参数
-function setTriggerAttach() {
-    console.log("[+] WeChat Base: " + baseAddr + "[+] Attaching to: " + triggerFuncAddr);
 
-    // 3. 开始拦截
-    Interceptor.attach(triggerFuncAddr, {
-        onEnter: function (args) {
-            console.log("[+] Entered Function: 0x10444A99C");
-
-            if (!globalMessagePtr.isNull()) {
-                return;
-            }
-
-            globalMessagePtr = this.context.x0;
-            console.log("[+] globalMessagePtr 当前 X0 的指针值: " + globalMessagePtr);
-        },
-        onLeave: function (retval) {
-        }
-    });
+function patchProtoBuf() {
+    // Memory.patchCode(patchProtobufAddr, 4, code => {
+    //     const cw = new Arm64Writer(code, {pc: patchProtobufAddr});
+    //     cw.putNop();
+    //     cw.flush();
+    // });
+    //
+    // console.log("[+] Patching BL to NOP at " + patchProtobufAddr + " completed.");
+    //
+    // Memory.patchCode(protobufDeleteAddr, 4, code => {
+    //     const cw = new Arm64Writer(code, {pc: protobufDeleteAddr});
+    //     cw.putNop();
+    //     cw.flush();
+    // });
+    //
+    // console.log("[+] Patching BL DELETE to NOP at " + protobufDeleteAddr + " completed.");
 }
 
-// 使用 setImmediate 确保在模块加载后执行
-setImmediate(setTriggerAttach);
-
+setImmediate(patchProtoBuf);
 
 function manualTrigger(taskId, receiver, content) {
     console.log("[+] Manual Trigger Started...");
-    if (globalMessagePtr.isNull()) {
-        console.error("[!] globalMessagePtr is NULL, cannot trigger!");
-        return "fail";
-    }
-
     if (!taskId || !receiver || !content) {
         console.error("[!] taskId or Receiver or Content is empty!");
         return "fail";
@@ -184,14 +256,15 @@ function manualTrigger(taskId, receiver, content) {
 
     messageAddr.add(0x08).writeU32(taskIdGlobal);
     sendMessageAddr.add(0x20).writeU32(taskIdGlobal);
-    messageAddrAddr.add(0x18).writeU32(timestamp);
+
+    console.log("start init payload")
 
     const payloadData = [
-        0x0A, 0x02, 0x00, 0x00,                         // 0x00
+        0x6e, 0x00, 0x00, 0x00,                         // 0x00
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 0x08
         0x03, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, // 0x10
         0x40, 0xec, 0x0e, 0x12, 0x01, 0x00, 0x00, 0x00, // 0x18
-        0x22, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 0x20
+        0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 0x20
         0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, // 0x28
         0x00, 0x01, 0x01, 0x01, 0x00, 0xAA, 0xAA, 0xAA, // 0x30
         0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, // 0x38
@@ -199,7 +272,7 @@ function manualTrigger(taskId, receiver, content) {
         0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0xAA, 0xAA, 0xAA, // 0x48
         0xFF, 0xFF, 0xFF, 0xFF, 0xAA, 0xAA, 0xAA, 0xAA, // 0x50
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 0x58
-        0x0A, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 0x60
+        0x6e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 0x60
         0x64, 0x65, 0x66, 0x61, 0x75, 0x6C, 0x74, 0x2D, // 0x68 default-
         0x6C, 0x6F, 0x6E, 0x67, 0x6C, 0x69, 0x6E, 0x6B, // 0x70 longlink
         0x00, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0x10, // 0x78
@@ -246,15 +319,17 @@ function manualTrigger(taskId, receiver, content) {
     triggerX1Payload.add(0x04).writeByteArray(payloadData);
     triggerX1Payload.add(0x18).writePointer(cgiAddr);
 
-    const sub_10444A99C = new NativeFunction(triggerFuncAddr, 'uint64', ['pointer', 'pointer']);
+    console.log("finished init payload")
+
+    const MMStartTask = new NativeFunction(triggerFuncAddr, 'int64', ['pointer']);
 
     // 5. 调用函数
     try {
-        const arg1 = globalMessagePtr; // 第一个指针参数
+        // const arg1 = globalMessagePtr; // 第一个指针参数
         const arg2 = triggerX1Payload; // 第二个参数 0x175ED6600
-        console.log(`[+] Calling trigger function  at ${triggerFuncAddr} with args: (${arg1}, ${arg2})`);
-        const result = sub_10444A99C(arg1, arg2);
-        console.log("[+] Execution trigger function  Success. Return value: " + result);
+        console.log(`[+] Calling MMStartTask  at ${triggerFuncAddr} with args: (${arg2})`);
+        const result = MMStartTask(arg2);
+        console.log("[+] Execution MMStartTask  Success. Return value: " + result);
         return "ok";
     } catch (e) {
         console.error("[!] Error trigger function  during execution: " + e);
@@ -280,14 +355,7 @@ function attachReq2buf() {
             // 3. 获取 X24 寄存器的值
             const x24_base = this.context.x24;
             insertMsgAddr = x24_base.add(0x60);
-
             console.log("[+] 当前 Req2Buf X24 基址: " + x24_base);
-            console.log("[+] 准备修改位置 Req2Buf (X24 + 0x60): " + insertMsgAddr, hexdump(insertMsgAddr, {
-                offset: 0,
-                length: 16,
-                header: true,
-                ansi: true
-            }));
 
             if (typeof sendMessageAddr !== 'undefined') {
                 insertMsgAddr.writePointer(sendMessageAddr);
@@ -319,7 +387,7 @@ function attachReq2buf() {
                 return;
             }
             insertMsgAddr.writeU64(0x0);
-            console.log("[+] 0x1033EFA00 清空写入后内存预览: " + insertMsgAddr.readPointer());
+            console.log("[+] 清空写入后内存预览: " + insertMsgAddr.readPointer());
             taskIdGlobal = 0;
             receiverGlobal = "";
             contentGlobal = "";
@@ -386,48 +454,187 @@ function attachProto() {
         onEnter: function (args) {
             console.log("[+] Protobuf 拦截命中");
 
-            var sp = this.context.sp;
-            console.log("[+] Protobuf 拦截命中，SP: " + sp, hexdump(sp, {
-                offset: 0,
-                length: 16,
-                header: true,
-                ansi: true
-            }));
+            // var sp = this.context.sp;
+            // var firstValue = sp.readU32();
+            // if (firstValue !== taskIdGlobal) {
+            //     console.log("[+] Protobuf 拦截未命中，跳过...");
+            //     return;
+            // }
 
+            const type = [0x0A, 0x3F, 0x0A, 0x01, 0x00, 0x10]
+            const msgId = [0xc6, 0xbc, 0x90, 0xb9, 0x08]
+            const cpHeader = [0x1A, 0x10]
+            const cp = [0x6D, 0x33, 0x30, 0x63, 0x34, 0x36, 0x37, 0x34, 0x66, 0x35, 0x61, 0x30, 0x62, 0x39, 0x64, 0x30] // m30c4674f5a0b9d0
+            const randomId = [0x20, 0xAF, 0xAC, 0x90, 0x93, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01]
+            const sysHeader = [0x2A, 0x15]
+            // UnifiedPCMac 26 arm64
+            const sys = [0x55, 0x6E, 0x69, 0x66, 0x69, 0x65, 0x64, 0x50, 0x43, 0x4D, 0x61, 0x63, 0x20, 0x32, 0x36, 0x20, 0x61, 0x72, 0x6D, 0x36, 0x34]
+            const msgIdHeader = [0x30, 0x73, 0x12, 0x2E, 0x0A, 0x2C]
+            // 45872025384@chatroom_176787000_60_xwechat_1
+            const receiverMsgId = [0x34, 0x35, 0x38, 0x37, 0x32, 0x30, 0x32, 0x35, 0x33, 0x38, 0x34,
+                0x40, 0x63, 0x68, 0x61, 0x74, 0x72, 0x6F, 0x6F, 0x6D, 0x5F, 0x31, 0x37, 0x36, 0x37, 0x38, 0x37,
+                0x30, 0x30, 0x30, 0x30, 0x5F, 0x36, 0x30, 0x5F, 0x78, 0x77, 0x65, 0x63, 0x68, 0x61, 0x74, 0x5F, 0x31,
+            ]
+            const senderHeader = [0x1A, 0x15, 0x0A, 0x13];
+            const sender = [0x77, 0x78, 0x69, 0x64, 0x5F, 0x6C, 0x64, 0x66, 0x74, 0x75, 0x68, 0x65, 0x33, 0x36, 0x69, 0x7A, 0x67, 0x31, 0x39];
+            const receiverHeader = [0x22, 0x16, 0x0A, 0x14]
+            const receiver = [0x34, 0x35, 0x38, 0x37, 0x32, 0x30, 0x32, 0x35, 0x33, 0x38, 0x34, 0x40, 0x63, 0x68, 0x61, 0x74, 0x72, 0x6F, 0x6F, 0x6D]
+            const randomId1 = [0x28, 0xF4, 0x0B]
+            const type1 = [0x30, 0x00]
+            const randomId2 = [0x38, 0xF4, 0x0B]
+            const randomId3 = [0x42, 0x04, 0x08, 0x00, 0x12, 0x00]
+            const randomId4 = [0x48, 0x03]
+            const htmlHeader = [0x52, 0x83, 0x01];
+            // <msgsource>
+            //     <img_file_name>cc357085-cbff-4968-b9fe-b4e4eab5b0ca.png</img_file_name>
+            //     <alnode>
+            //         <fr>1</fr>
+            //         <cf>3</cf>
+            //     </alnode>
+            // </msgsource>
+            const html = [0x3C, 0x6D, 0x73, 0x67, 0x73, 0x6F, 0x75, 0x72, 0x63, 0x65, 0x3E, 0x3C, 0x69,
+                0x6D, 0x67, 0x5F, 0x66, 0x69, 0x6C, 0x65, 0x5F, // 0xC0
+                0x6E, 0x61, 0x6D, 0x65, 0x3E, 0x63, 0x63, 0x33, // 0xC8
+                0x35, 0x37, 0x30, 0x38, 0x35, 0x2D, 0x63, 0x62, // 0xD0
+                0x66, 0x66, 0x2D, 0x34, 0x39, 0x36, 0x38, 0x2D, // 0xD8
+                0x62, 0x39, 0x66, 0x65, 0x2D, 0x62, 0x34, 0x65, // 0xE0
+                0x34, 0x65, 0x61, 0x62, 0x35, 0x62, 0x30, 0x63, // 0xE8
+                0x61, 0x2E, 0x70, 0x6E, 0x67, 0x3C, 0x2F, 0x69, // 0xF0
+                0x6D, 0x67, 0x5F, 0x66, 0x69, 0x6C, 0x65, 0x5F, // 0xF8
+                0x6E, 0x61, 0x6D, 0x65, 0x3E, 0x3C, 0x61, 0x6C, // 0x100
+                0x6E, 0x6F, 0x64, 0x65, 0x3E, 0x3C, 0x66, 0x72, // 0x108
+                0x3E, 0x31, 0x3C, 0x2F, 0x66, 0x72, 0x3E, 0x3C, // 0x110
+                0x63, 0x66, 0x3E, 0x33, 0x3C, 0x2F, 0x63, 0x66, // 0x118
+                0x3E, 0x3C, 0x2F, 0x61, 0x6C, 0x6E, 0x6F, 0x64, // 0x120
+                0x65, 0x3E, 0x3C, 0x2F, 0x6D, 0x73, 0x67, 0x73, // 0x128
+                0x6F, 0x75, 0x72, 0x63, 0x65, 0x3E,
+            ]
 
-            var firstValue = sp.readU32();
-            if (firstValue !== taskIdGlobal) {
-                console.log("[+] Protobuf 拦截未命中，跳过...");
-                return;
-            }
-            console.log("[+] 正在注入 Protobuf Payload...");
-
-            const type = [0x08, 0x01, 0x12]
-            const receiverHeader = [0x0A, receiverGlobal.length + 2, 0x0A, receiverGlobal.length];
-            const receiverProto = stringToHexArray(receiverGlobal);
-            const contentProto = stringToHexArray(contentGlobal);
-            const contentHeader = [0x12, ...toVarint(contentProto.length)];
-            const tsHeader = [0x18, 0x01, 0x20];
-            const tsBytes = getVarintTimestampBytes();
-            const msgIdHeader = [0x28]
-            const msgId = generateRandom5ByteVarint()
-
-            const suffix = [
-                0x32, 0x32, 0x3C,                               // 0x28 头部
-                0x6D, 0x73, 0x67, 0x73, 0x6F, 0x75, 0x72, // 0x30 msgsour
-                0x63, 0x65, 0x3E, 0x3C, 0x61, 0x6C, 0x6E, 0x6F, // 0x38 ce><alno
-                0x64, 0x65, 0x3E, 0x3C, 0x66, 0x72, 0x3E, 0x31, // 0x40 de><fr>1
-                0x3C, 0x2F, 0x66, 0x72, 0x3E, 0x3C, 0x2F, 0x61, // 0x48 </fr></a
-                0x6C, 0x6E, 0x6F, 0x64, 0x65, 0x3E, 0x3C, 0x2F, // 0x50 lnode></
-                0x6D, 0x73, 0x67, 0x73, 0x6F, 0x75, 0x72, // 0x58 msgsour
-                0x63, 0x65, 0x3E, 0x00                          // 0x60 ce>.
+            const cdnHeader = [0x58, 0x01, 0x60, 0x02, 0x68, 0x05, 0x7A, 0xB2, 0x01]
+            // 3057 开头的cdn key
+            const cdn = [0x33, // 0x138
+                0x30, 0x35, 0x37, 0x30, 0x32, 0x30, 0x31, 0x30, // 0x140
+                0x30, 0x30, 0x34, 0x34, 0x62, 0x33, 0x30, 0x34, // 0x148
+                0x39, 0x30, 0x32, 0x30, 0x31, 0x30, 0x30, 0x30, // 0x150
+                0x32, 0x30, 0x34, 0x64, 0x30, 0x61, 0x37, 0x30, // 0x158
+                0x39, 0x35, 0x64, 0x30, 0x32, 0x30, 0x33, 0x32, // 0x160
+                0x66, 0x35, 0x61, 0x34, 0x35, 0x30, 0x32, 0x30, // 0x168
+                0x34, 0x65, 0x61, 0x38, 0x65, 0x30, 0x65, 0x37, // 0x170
+                0x39, 0x30, 0x32, 0x30, 0x34, 0x36, 0x39, 0x35, // 0x178
+                0x66, 0x38, 0x65, 0x33, 0x31, 0x30, 0x34, 0x32, // 0x180
+                0x34, 0x33, 0x37, 0x33, 0x39, 0x36, 0x35, 0x33, // 0x188
+                0x31, 0x33, 0x37, 0x33, 0x31, 0x33, 0x34, 0x33, // 0x190
+                0x35, 0x32, 0x64, 0x33, 0x34, 0x33, 0x34, 0x33,  // 0x198
+                0x35, 0x33, 0x35, 0x32, 0x64, 0x33, 0x34, 0x33, // 0x1A0
+                0x33, 0x36, 0x33, 0x33, 0x32, 0x32, 0x64, 0x36, // 0x1A8
+                0x31, 0x33, 0x35, 0x33, 0x32, 0x33, 0x31, 0x32, // 0x1B0
+                0x64, 0x33, 0x39, 0x33, 0x33, 0x33, 0x32, 0x33, // 0x1B8
+                0x32, 0x36, 0x34, 0x36, 0x34, 0x36, 0x32, 0x36, // 0x1C0
+                0x31, 0x33, 0x37, 0x36, 0x36, 0x33, 0x32, 0x36, // 0x1C8
+                0x36, 0x30, 0x32, 0x30, 0x34, 0x30, 0x35, 0x32, // 0x1D0
+                0x34, 0x33, 0x38, 0x30, 0x31, 0x30, 0x32, 0x30, // 0x1D8
+                0x31, 0x30, 0x30, 0x30, 0x34, 0x30, 0x35, 0x30, // 0x1E0
+                0x30, 0x34, 0x63, 0x34, 0x65, 0x36, 0x31, 0x30, // 0x1E8
+                0x30,
             ];
 
-            const valueLen = toVarint(receiverHeader.length + receiverProto.length + contentHeader.length +
-                contentProto.length + tsHeader.length + tsBytes.length + msgIdHeader.length + msgId.length + suffix.length)
+            const cdn2Header = [0x82, 0x01, 0xB2, 0x01]
+            const cdn2 = [
+                0x33, 0x30, 0x35, // 0x1F0
+                0x37, 0x30, 0x32, 0x30, 0x31, 0x30, 0x30, 0x30, // 0x1F8
+                0x34, 0x34, 0x62, 0x33, 0x30, 0x34, 0x39, 0x30, // 0x200
+                0x32, 0x30, 0x31, 0x30, 0x30, 0x30, 0x32, 0x30, // 0x208
+                0x34, 0x64, 0x30, 0x61, 0x37, 0x30, 0x39, 0x35, // 0x210
+                0x64, 0x30, 0x32, 0x30, 0x33, 0x32, 0x66, 0x35, // 0x218
+                0x61, 0x34, 0x35, 0x30, 0x32, 0x30, 0x34, 0x65, // 0x220
+                0x61, 0x38, 0x65, 0x30, 0x65, 0x37, 0x39, 0x30, // 0x228
+                0x32, 0x30, 0x34, 0x36, 0x39, 0x35, 0x66, 0x38, // 0x230
+                0x65, 0x33, 0x31, 0x30, 0x34, 0x32, 0x34, 0x33, // 0x238
+                0x37, 0x33, 0x39, 0x36, 0x35, 0x33, 0x31, 0x33, // 0x240
+                0x37, 0x33, 0x31, 0x33, 0x34, 0x33, 0x35, 0x32, // 0x248
+                0x64, 0x33, 0x34, 0x33, 0x34, 0x33, 0x35, 0x33, // 0x250
+                0x35, 0x32, 0x64, 0x33, 0x34, 0x33, 0x33, 0x36, // 0x258
+                0x33, 0x33, 0x32, 0x32, 0x64, 0x36, 0x31, 0x33, // 0x260
+                0x35, 0x33, 0x32, 0x33, 0x31, 0x32, 0x64, 0x33, // 0x268
+                0x39, 0x33, 0x33, 0x33, 0x32, 0x33, 0x32, 0x36, // 0x270
+                0x34, 0x36, 0x34, 0x36, 0x32, 0x36, 0x31, 0x33, // 0x278
+                0x37, 0x36, 0x36, 0x33, 0x32, 0x36, 0x36, 0x30, // 0x280
+                0x32, 0x30, 0x34, 0x30, 0x35, 0x32, 0x34, 0x33, // 0x288
+                0x38, 0x30, 0x31, 0x30, 0x32, 0x30, 0x31, 0x30, // 0x290
+                0x30, 0x30, 0x34, 0x30, 0x35, 0x30, 0x30, 0x34, // 0x298
+                0x63, 0x34, 0x65, 0x36, 0x31, 0x30, 0x30,
+            ]
 
-            // 合并数组
-            const finalPayload = type.concat(valueLen).concat(receiverHeader).concat(receiverProto).concat(contentHeader).concat(contentProto).concat(tsHeader).concat(tsBytes).concat(msgIdHeader).concat(msgId).concat(suffix);
+            const aesKeyHeader = [0x8A, 0x01, 0x20]
+            const aesKey = [
+                0x38, 0x31, 0x66, 0x66, 0x37, 0x65, // 0x2A8
+                0x61, 0x37, 0x36, 0x37, 0x31, 0x34, 0x66, 0x33, // 0x2B0
+                0x30, 0x66, 0x36, 0x63, 0x32, 0x63, 0x33, 0x64, // 0x2B8
+                0x37, 0x37, 0x30, 0x64, 0x39, 0x38, 0x63, 0x35, // 0x2C0
+                0x64, 0x65,
+            ]
+
+            const randomId5 = [0x90, 0x01, 0x01, 0x98, 0x01, 0xFF, // 0x2C8
+                0x13, 0xA0, 0x01, 0xFF, 0x13]
+
+            const cdn3Header = [0xAA, 0x01, 0xB2, 0x01]
+            const cdn3 = [
+                0x33, 0x30, 0x35, 0x37, 0x30, 0x32, 0x30, // 0x2D8
+                0x31, 0x30, 0x30, 0x30, 0x34, 0x34, 0x62, 0x33, // 0x2E0
+                0x30, 0x34, 0x39, 0x30, 0x32, 0x30, 0x31, 0x30, // 0x2E8
+                0x30, 0x30, 0x32, 0x30, 0x34, 0x64, 0x30, 0x61, // 0x2F0
+                0x37, 0x30, 0x39, 0x35, 0x64, 0x30, 0x32, 0x30, // 0x2F8
+                0x33, 0x32, 0x66, 0x35, 0x61, 0x34, 0x35, 0x30, // 0x300
+                0x32, 0x30, 0x34, 0x65, 0x61, 0x38, 0x65, 0x30, // 0x308
+                0x65, 0x37, 0x39, 0x30, 0x32, 0x30, 0x34, 0x36, // 0x310
+                0x39, 0x35, 0x66, 0x38, 0x65, 0x33, 0x31, 0x30, // 0x318
+                0x34, 0x32, 0x34, 0x33, 0x37, 0x33, 0x39, 0x36, // 0x320
+                0x35, 0x33, 0x31, 0x33, 0x37, 0x33, 0x31, 0x33, // 0x328
+                0x34, 0x33, 0x35, 0x32, 0x64, 0x33, 0x34, 0x33, // 0x330
+                0x34, 0x33, 0x35, 0x33, 0x35, 0x32, 0x64, 0x33, // 0x338
+                0x34, 0x33, 0x33, 0x36, 0x33, 0x33, 0x32, 0x32, // 0x340
+                0x64, 0x36, 0x31, 0x33, 0x35, 0x33, 0x32, 0x33, // 0x348
+                0x31, 0x32, 0x64, 0x33, 0x39, 0x33, 0x33, 0x33, // 0x350
+                0x32, 0x33, 0x32, 0x36, 0x34, 0x36, 0x34, 0x36, // 0x358
+                0x32, 0x36, 0x31, 0x33, 0x37, 0x36, 0x36, 0x33, // 0x360
+                0x32, 0x36, 0x36, 0x30, 0x32, 0x30, 0x34, 0x30, // 0x368
+                0x35, 0x32, 0x34, 0x33, 0x38, 0x30, 0x31, 0x30, // 0x370
+                0x32, 0x30, 0x31, 0x30, 0x30, 0x30, 0x34, 0x30, // 0x378
+                0x35, 0x30, 0x30, 0x34, 0x63, 0x34, 0x65, 0x36, // 0x380
+                0x31, 0x30, 0x30
+            ]
+
+            const randomId6 = [0xB0, 0x01, 0xF4, 0x0B]
+            const randomId7 = [0xB8, 0x01, 0x68]
+            const randomId8 = [0xC0, 0x01, 0x3A]
+            const aesKey1Header = [0xCA, 0x01, 0x20]
+            const aesKey1 = [
+                0x38, 0x31, 0x66, 0x66, 0x37, 0x65, 0x61, 0x37, // 0x398
+                0x36, 0x37, 0x31, 0x34, 0x66, 0x33, 0x30, 0x66, // 0x3A0
+                0x36, 0x63, 0x32, 0x63, 0x33, 0x64, 0x37, 0x37, // 0x3A8
+                0x30, 0x64, 0x39, 0x38, 0x63, 0x35, 0x64, 0x65, // 0x3B0
+            ]
+            const aesKey2Header = [0xDA, 0x01, 0x20]
+            const aesKey2 = [
+                0x36, 0x37, 0x36, 0x33, 0x32, // 0x3B8
+                0x35, 0x32, 0x30, 0x35, 0x36, 0x38, 0x35, 0x37, // 0x3C0
+                0x61, 0x64, 0x66, 0x65, 0x35, 0x36, 0x36, 0x31, // 0x3C8
+                0x30, 0x35, 0x37, 0x30, 0x63, 0x61, 0x34, 0x32, // 0x3D0
+                0x38, 0x34, 0x63,
+            ]
+
+            const randomId9 = [0xE0, 0x01, 0xd9, 0xe7, 0xc7, 0xF3, 0x02]
+
+
+            var left0 = [
+                0xF0, 0x01, 0x00, 0xA0, 0x02, 0x00, // 0x3E0
+                0xC8, 0x02, 0x00, 0x00 // 0x3E8
+            ]
+
+            const finalPayload = type.concat(msgId, cpHeader, cp, randomId, sysHeader, sys, msgIdHeader, receiverMsgId,
+                senderHeader, sender, receiverHeader, receiver, randomId1, type1, randomId2, randomId3, randomId4, htmlHeader, html, cdnHeader,
+                cdn,cdn2Header, cdn2,aesKeyHeader,aesKey, randomId5, cdn3Header, cdn3, randomId6, randomId7, randomId8, aesKey1Header, aesKey1,
+                aesKey2Header, aesKey2, randomId9, left0)
 
             console.log("[+] Payload 准备写入");
             protoX1PayloadAddr.writeByteArray(finalPayload);
@@ -438,11 +645,11 @@ function attachProto() {
 
             console.log("[+] 寄存器修改完成: X1=" + this.context.x1 + ", X2=" + this.context.x2, hexdump(protoX1PayloadAddr, {
                 offset: 0,
-                length: 128,
+                length: 1024,
                 header: true,
                 ansi: true
             }));
-        }
+        },
     });
 }
 
@@ -459,61 +666,79 @@ function toVarint(n) {
 setImmediate(attachProto);
 
 function setReceiver() {
-    console.log("[+] setReceiver WeChat Base: " + baseAddr + "[+] Attaching to: " + receiveAddr);
+    console.log("[+] buf2RespAddr WeChat Base: " + baseAddr + "[+] Attaching to: " + buf2RespAddr);
 
     // 3. 开始拦截
-    Interceptor.attach(receiveAddr, {
+    Interceptor.attach(buf2RespAddr, {
         onEnter: function (args) {
-            console.log("[+] Entered Receive Function: 0x1023B5348");
-            const x1 = this.context.x1;
-            var sender = x1.add(0x18).readUtf8String();
-            var receiver = x1.add(0x30).readUtf8String();
-            var senderUser = x1.add(0x48).readUtf8String();
 
-            // 3. 从 0xd0 开始处理
-            var d0Pos = x1.add(0xd0);
-            var strD0 = "";
-
-            if (isPrintableOrChinese(d0Pos)) {
-                strD0 = d0Pos.readUtf8String();
-                console.log("[+] 0xd0 处不是指针，直接读取完毕");
-            } else {
-                // 情况 B：不符合特征（如包含乱码位或指针特征），视为指针
-                var ptrD0 = d0Pos.readPointer();
-                if (!ptrD0.isNull() && Process.findRangeByAddress(ptrD0)) {
-                    strD0 = ptrD0.readUtf8String();
-                    console.log("[+] 0xd0 识别为：指针跳转读取");
-                } else {
-                    strD0 = "Invalid Data/Pointer";
+            const currentPtr = this.context.x1;
+            let start = 0x1e;
+            let senderLen = currentPtr.add(start).readU8();
+            if (senderLen !== 0x14 && senderLen !== 0x13) {
+                start = 0x1d;
+                let senderLen = currentPtr.add(start).readU8();
+                if (senderLen !== 0x14 && senderLen !== 0x13) {
+                    return
                 }
             }
+
+            console.log("[+] Entered Receive Function: 0x1023B5348");
+
+            let senderPtr = currentPtr.add(start + 1);
+            let sender = senderPtr.readUtf8String(senderLen);
+
+            let receiverLenPtr = senderPtr.add(senderLen).add(3);
+            let receiverLen = receiverLenPtr.readU8();
+            let receiverStrPtr = receiverLenPtr.add(1);
+            let receiver = receiverStrPtr.readUtf8String(receiverLen);
+
+            let contentLenPtr = receiverStrPtr.add(receiverLen).add(6);
+            // 判断是否等于 0x77 ('w'), 如果是，则是短字段
+            if (contentLenPtr.readU8() === 0x77) {
+                contentLenPtr = contentLenPtr.add(-1);
+            }
+            const contentLenValue = readVarint(contentLenPtr)
+            let contentPtr = contentLenPtr.add(contentLenValue.byteLength);
+            var content = contentPtr.readUtf8String(contentLenValue.value);
 
             var selfId = receiver
             var msgType = "private"
             var groupId = ""
-            if (receiver.includes("@chatroom")) {
-                msgType = "group"
-                groupId = receiver
-                selfId = senderUser
-            }
+            var senderUser = sender
+            var messages = [];
+            messages.push({type: "text", data: {text: content}});
+
             if (sender.includes("@chatroom")) {
                 msgType = "group"
                 groupId = sender
-            }
+                let splitIndex = -1;
+                for (let i = 0; i < content.length; i++) {
+                    if (content[i] === ':') {
+                        splitIndex = i;
+                        break;
+                    }
+                }
 
-            var delimiter = ":\n";
-            var index = strD0.indexOf(delimiter);
-            if (index !== -1) {
-                strD0 = strD0.substring(index + delimiter.length).trim();
-            }
-            var parts = strD0.split('\u2005');
-            var messages = [];
-            for (let part of parts) {
-                part = part.trim();
-                if (part.startsWith("@")) {
-                    messages.push({type: "at", data: {qq: selfId}});
-                } else {
-                    messages.push({type: "text", data: {text: part}});
+                senderUser = content.substring(0, splitIndex).trim();
+                content = content.substring(splitIndex + 2).trim();
+
+                messages = [];
+                const parts = content.split('\u2005');
+                for (let part of parts) {
+                    part = part.trim();
+                    if (!part.startsWith("@")) {
+                        messages.push({type: "text", data: {text: part}});
+                    }
+                }
+
+                const xmlPtr = contentPtr.add(contentLenValue.value).add(15);
+                const xmlLenValue = readVarint(xmlPtr)
+                const xml = xmlPtr.add(xmlLenValue.byteLength).readUtf8String(xmlLenValue.value);
+                const atUserMatch = xml.match(/<atuserlist>([\s\S]*?)<\/atuserlist>/);
+                const atUser = atUserMatch ? atUserMatch[1] : null;
+                if (atUser) {
+                    messages.push({type: "at", data: {qq: atUser}});
                 }
             }
 
@@ -534,37 +759,28 @@ function setReceiver() {
 // 使用 setImmediate 确保在模块加载后执行
 setImmediate(setReceiver)
 
-/**
- * 扫描内存直到 \0，判断中间内容是否全部为可见字符或汉字
- */
-function isPrintableOrChinese(startPtr) {
-    let offset = 0;
-    const maxScanLength = 8;
+function readVarint(addr) {
+    let value = 0;
+    let shift = 0;
+    let count = 0;
 
-    while (offset < maxScanLength) {
-        let b = startPtr.add(offset).readU8();
+    while (true) {
+        let byte = addr.add(count).readU8();
+        // 取低7位进行累加
+        value |= (byte & 0x7f) << shift;
+        count++; // 消耗了一个字节
 
-        if (b === 0) {
-            // 扫描到 \0，且之前没有发现异常字节
-            return offset > 0; // 如果第一个就是 \0，视为非字符串（可能是空指针）
-        }
+        // 如果最高位是0，跳出循环
+        if ((byte & 0x80) === 0) break;
 
-        // 判定逻辑：
-        // 1. 可见 ASCII (32-126) 或 换行/制表符 (9, 10, 13)
-        let isAscii = (b >= 32 && b <= 126) || (b === 9 || b === 10 || b === 13);
-
-        // 2. 汉字 UTF-8 特征：第一个字节通常 >= 0x80 (128)
-        // 严谨点：UTF-8 汉字首字节通常在 0xE4-0xE9 之间，后续字节在 0x80-0xBF 之间
-        // 这里简化处理：如果是高位字符，我们暂时放行，由 readUtf8String 最终处理
-        let isHighBit = (b >= 0x80);
-
-        if (!isAscii && !isHighBit) {
-            // 发现既不是 ASCII 也不是高位字节（如 0x01-0x1F 的控制字符），判定为指针
-            return false;
-        }
-        offset++;
+        shift += 7;
+        if (count > 5) return -1; // 安全校验，防止死循环
     }
-    return true;
+
+    return {
+        value: value,      // 最终长度数值 (例如 251)
+        byteLength: count  // 长度字段占用的字节数 (例如 2)
+    };
 }
 
 

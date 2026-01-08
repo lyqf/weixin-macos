@@ -445,14 +445,19 @@ function setReceiver() {
         onEnter: function (args) {
 
             const currentPtr = this.context.x1;
-            let senderLen = currentPtr.add(0x1e).readU8();
+            let start = 0x1e;
+            let senderLen = currentPtr.add(start).readU8();
             if (senderLen !== 0x14 && senderLen !== 0x13) {
-                return
+                start = 0x1d;
+                let senderLen = currentPtr.add(start).readU8();
+                if (senderLen !== 0x14 && senderLen !== 0x13) {
+                    return
+                }
             }
 
             console.log("[+] Entered Receive Function: 0x1023B5348");
 
-            let senderPtr = currentPtr.add(0x1e + 1);
+            let senderPtr = currentPtr.add(start + 1);
             let sender = senderPtr.readUtf8String(senderLen);
 
             let receiverLenPtr = senderPtr.add(senderLen).add(3);
@@ -460,10 +465,14 @@ function setReceiver() {
             let receiverStrPtr = receiverLenPtr.add(1);
             let receiver = receiverStrPtr.readUtf8String(receiverLen);
 
-            let contentLenPtr = receiverStrPtr.add(receiverLen).add(5);
-            let contentLen = contentLenPtr.readU8();
-            let contentPtr = contentLenPtr.add(1);
-            var content = contentPtr.readUtf8String(contentLen);
+            let contentLenPtr = receiverStrPtr.add(receiverLen).add(6);
+            // 判断是否等于 0x77 ('w'), 如果是，则是短字段
+            if (contentLenPtr.readU8() === 0x77) {
+                contentLenPtr = contentLenPtr.add(-1);
+            }
+            const contentLenValue = readVarint(contentLenPtr)
+            let contentPtr = contentLenPtr.add(contentLenValue.byteLength);
+            var content = contentPtr.readUtf8String(contentLenValue.value);
 
             var selfId = receiver
             var msgType = "private"
@@ -495,7 +504,7 @@ function setReceiver() {
                     }
                 }
 
-                const xmlPtr = contentPtr.add(contentLen).add(15);
+                const xmlPtr = contentPtr.add(contentLenValue.value).add(15);
                 const xmlLenValue = readVarint(xmlPtr)
                 const xml = xmlPtr.add(xmlLenValue.byteLength).readUtf8String(xmlLenValue.value);
                 const atUserMatch = xml.match(/<atuserlist>([\s\S]*?)<\/atuserlist>/);
