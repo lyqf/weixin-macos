@@ -8,9 +8,6 @@ console.log("[+] WeChat base address: " + baseAddr);
 // 触发函数地址,不同版本的地址看wechat_version 中的json文件复制过来
 var sendMessageCallbackFunc = ptr(0);
 var messageCallbackFunc1 = baseAddr.add(0x7fa1050);
-var messageCallbackFunc2 = baseAddr.add(0x7fa10a8);
-var messageCallbackFunc3 = baseAddr.add(0x80335b0);
-var messageCallbackFunc4 = baseAddr.add(0x80336a0);
 
 // 这个必须是绝对位置
 var triggerX1Payload = ptr(0x175ED6600);
@@ -35,7 +32,6 @@ var contentAddr = ptr(0);
 var insertMsgAddr = ptr(0);
 var receiverAddr = ptr(0)
 var protoX1PayloadAddr = ptr(0);
-var messageContentAddr = ptr(0);
 var protoX1PayloadLen = 1024;
 
 // 消息的taskId
@@ -100,25 +96,7 @@ function setupSendMessageDynamic() {
     messageAddr.add(0x0c).writeU32(0x20a);
     messageAddr.add(0x10).writeU64(0x3);
     messageAddr.add(0x18).writePointer(cgiAddr);
-
-    // 设置一些固定值
     messageAddr.add(0x20).writeU64(uint64("0x20"));
-    messageAddr.add(0x28).writeU64(uint64("0x8000000000000030"));
-    messageAddr.add(0x30).writeU64(uint64("0x0000000001010100"));
-    messageAddr.add(0x58).writeU64(uint64("0x0101010100000001"));
-
-    // 处理回调地址
-    callBackFuncAddr.writePointer(messageCallbackFunc2);
-    messageAddr.add(0x98).writePointer(callBackFuncAddr);
-
-    // 设置内容指针
-    messageAddr.add(0xb8).writePointer(messageCallbackFunc3);
-    messageAddr.add(0xc0).writePointer(messageContentAddr);
-    messageAddr.add(0xc8).writeU64(uint64("0x0000000100000001"));
-    messageAddr.add(0xd0).writeU64(0x4);
-    messageAddr.add(0xd8).writeU64(0x1);
-    messageAddr.add(0xe0).writeU64(0x1);
-    messageAddr.add(0xe8).writePointer(messageCallbackFunc4);
 
     console.log(" [+] messageAddr Object: ", hexdump(messageAddr, {
         offset: 0,
