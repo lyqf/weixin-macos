@@ -1,103 +1,71 @@
-// ====== 配置：你想 Hook 的 WeChat 函数偏移 ======
-const WECHAT_OFFSETS = [
-    0x4565b2c,
-    0x4566f1c,
-    0x4564860,
-    0x4591ff8,
-    0x45d09cc,
-    0x45cebbc,
-    0x4591fa0,
-    0x4581834,
-    0x4581760,
-    0x4387d08,
-    0x4334e88,
-    0x4328ebc,
-    0x4384764,
-    0x43811e8
-];
-
-// ====== 统一安全打印函数 ======
-function safePrintRegister(args) {
-    for (let i = 0; i < 8; i++) {
-        try {
-            console.log(`x${i}: ${args[i]}`);
-        } catch (e) {
-            console.log(`x${i}: <无法读取> (${e})`);
-        }
-    }
-}
-
-function safePrintBacktrace(context) {
+function dumpMemoryToHex(ptr, size) {
     try {
-        let bt = Thread.backtrace(
-            context,
-            Backtracer.FUZZY       // 更稳定，遇到系统函数更不容易崩
-        ).map(DebugSymbol.fromAddress)
-            .join("\n");
+        // 1. 读取内存数据
+        const buffer = ptr.readByteArray(size);
+        const data = new Uint8Array(buffer);
 
-        console.log("\n--- 调用堆栈 ---");
-        console.log(bt);
-        console.log("-----------------\n");
+        let output = "";
+        let line = "";
+
+        for (let i = 0; i < data.length; i++) {
+            // 格式化为 0x00 形式
+            const hex = "0x" + data[i].toString(16).padStart(2, '0').toUpperCase();
+            line += hex;
+
+            // 如果不是最后一个元素，添加逗号和空格
+            if (i < data.length - 1) {
+                line += ", ";
+            }
+
+            // 每 8 个字节输出一行
+            if ((i + 1) % 8 === 0 || i === data.length - 1) {
+                output += line + "\n";
+                line = "";
+            }
+        }
+
+        console.log("==================== MEMORY DUMP ====================");
+        console.log(output);
+        console.log("=====================================================");
 
     } catch (e) {
-        console.log("无法获取堆栈：" + e);
+        console.log("[-] Dump 失败: " + e.message);
     }
 }
 
-// ====== 主逻辑：Hook 偏移量函数 ======
-function hook_wechat_internal_functions() {
-    const wechatModule = Process.findModuleByName("WeChat");
-    if (!wechatModule) {
-        console.error("❌ 找不到 WeChat 模块");
-        return;
+
+
+function generateRandom5ByteVarint() {
+    let res = [];
+
+    // 前 4 个字节：最高位(bit 7)必须是 1，低 7 位随机
+    for (let i = 0; i < 4; i++) {
+        let random7Bit = Math.floor(Math.random() * 128);
+        res.push(random7Bit | 0x80); // 强制设置最高位为 1
     }
 
-    const base = wechatModule.base;
-    console.log("📌 WeChat Base:", base);
+    // 第 5 个字节：最高位必须是 0，为了确保不变成 4 字节，低 7 位不能全为 0
+    let lastByte = Math.floor(Math.random() * 127) + 1;
+    res.push(lastByte & 0x7F); // 确保最高位为 0
 
-    WECHAT_OFFSETS.forEach(offset => {
-        const target = base.add(offset);
+    return res;
+}
 
-        // 尝试符号化
-        let funcName = `WeChat!0x${offset.toString(16)}`;
-        try {
-            const sym = DebugSymbol.fromAddress(target);
-            if (sym && sym.name) funcName = sym.name;
-        } catch (_) {}
+// 辅助函数：Protobuf Varint 编码 (对应 get_varint_timestamp_bytes)
+function getVarintTimestampBytes() {
+    let ts = Math.floor(Date.now() / 1000);
+    let encodedBytes = [];
+    let tempTs = ts >>> 0; // 强制转为 32位 无符号整数
 
-        console.log(`\n🔧 准备 Hook: ${funcName} @ 0x${target}`);
-
-        try {
-            Interceptor.attach(target, {
-                onEnter(args) {
-                    console.log("\n==============================================");
-                    console.log(`🚀 进入函数: ${funcName}`);
-                    console.log(`📍 地址: 0x${target}`);
-
-                    console.log("\n--- 🧩 寄存器参数 x0-x7 ---");
-                    safePrintRegister(args);
-
-                    console.log("\n--- 🧵 调用堆栈 ---");
-                    safePrintBacktrace(this.context);
-
-                    console.log("==============================================\n");
-                },
-
-                onLeave(retval) {
-                    // 如果需要打印返回值，可打开：
-                    // console.log("返回值:", retval);
-                }
-            });
-
-            console.log(`✅ 已 Hook: ${funcName}`);
-
-        } catch (e) {
-            console.error(`❌ Hook 失败 @ 0x${target} ：${e}`);
+    while (true) {
+        let byte = tempTs & 0x7F;
+        tempTs >>>= 7;
+        if (tempTs !== 0) {
+            encodedBytes.push(byte | 0x80);
+        } else {
+            encodedBytes.push(byte);
+            break;
         }
-    });
+    }
+    return encodedBytes;
 }
-
-// ====== 入口 ======
-setImmediate(() => {
-    hook_wechat_internal_functions();
-});

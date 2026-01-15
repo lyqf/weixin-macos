@@ -16,7 +16,6 @@ var triggerFuncAddr = baseAddr.add(0x448A858);
 var req2bufEnterAddr = baseAddr.add(0x34566C0);
 var req2bufExitAddr = baseAddr.add(0x34577D8);
 var protobufAddr = baseAddr.add(0x2275BFC);
-var buf2RespAddr = baseAddr.add(0x347BD44);
 var patchProtobufFunc1 = baseAddr.add(0x2275BB8)
 var patchProtobufFunc2 = baseAddr.add(0x2275BD8);
 var protobufDeleteAddr = baseAddr.add(0x2275C14);
@@ -49,7 +48,7 @@ var senderGlobal = "wxid_ldftuhe36izg19"
 var lastSendTime = 0;
 var globalImageCdnKey = "";
 var globalAesKey1 = "";
-var globalAesKey2 = "";
+var globalMd5Key = "";
 
 // 打印消息的地址，便于查询问题
 function printAddr() {
@@ -60,13 +59,6 @@ function printAddr() {
     console.log("    - contentAddr: " + contentAddr);
     console.log("    - globalMessagePtr: " + globalMessagePtr);
     console.log("    - triggerX1Payload: " + triggerX1Payload);
-}
-
-// 辅助函数：写入 Hex 字符串
-function patchHex(addr, hexStr) {
-    const bytes = hexStr.split(' ').map(h => parseInt(h, 16));
-    addr.writeByteArray(bytes);
-    addr.add(bytes.length).writeU8(0); // 终止符
 }
 
 // 初始化进行内存的分配
@@ -87,8 +79,8 @@ function setupSendMessageDynamic() {
 
 
     // A. 写入字符串内容
-    patchHex(cgiAddr, "2f 63 67 69 2d 62 69 6e 2f 6d 69 63 72 6f 6d 73 67 2d 62 69 6e 2f 75 70 6c 6f 61 64 6d 73 67 69 6d 67");
-    patchHex(contentAddr, " ");
+    patchString(cgiAddr, "/cgi-bin/micromsg-bin/uploadmsgimg");
+    patchString(contentAddr, " ");
 
     // B. 构建 SendMessage 结构体 (X24 基址位置)
     sendMessageAddr.add(0x00).writeU64(0);
@@ -126,13 +118,6 @@ function setupSendMessageDynamic() {
 }
 
 setImmediate(setupSendMessageDynamic);
-
-// 辅助函数：写入 Hex 字符串
-function patchHex(addr, hexStr) {
-    const bytes = hexStr.split(' ').map(h => parseInt(h, 16));
-    addr.writeByteArray(bytes);
-    addr.add(bytes.length).writeU8(0); // 终止符
-}
 
 
 function patchProtoBuf() {
@@ -174,8 +159,8 @@ function manualTrigger(taskId, sender, receiver) {
     const timestamp = Math.floor(Date.now() / 1000);
     lastSendTime = timestamp
     taskIdGlobal = taskId;
-    // receiverGlobal = receiver;
-    // senderGlobal = sender;
+    receiverGlobal = receiver;
+    senderGlobal = sender;
 
     messageAddr.add(0x08).writeU32(taskIdGlobal);
     sendMessageAddr.add(0x20).writeU32(taskIdGlobal);
@@ -311,7 +296,8 @@ function attachReq2buf() {
             }
             insertMsgAddr.writeU64(0x0);
             console.log("[+] 清空写入后内存预览: " + insertMsgAddr.readPointer());
-            // receiverGlobal = "";
+            receiverGlobal = "";
+            taskIdGlobal = 0;
             send({
                 type: "finish",
             })
@@ -321,24 +307,6 @@ function attachReq2buf() {
 
 setImmediate(attachReq2buf);
 
-// 辅助函数：Protobuf Varint 编码 (对应 get_varint_timestamp_bytes)
-function getVarintTimestampBytes() {
-    let ts = Math.floor(Date.now() / 1000);
-    let encodedBytes = [];
-    let tempTs = ts >>> 0; // 强制转为 32位 无符号整数
-
-    while (true) {
-        let byte = tempTs & 0x7F;
-        tempTs >>>= 7;
-        if (tempTs !== 0) {
-            encodedBytes.push(byte | 0x80);
-        } else {
-            encodedBytes.push(byte);
-            break;
-        }
-    }
-    return encodedBytes;
-}
 
 function stringToHexArray(str) {
     var utf8Str = unescape(encodeURIComponent(str));
@@ -347,22 +315,6 @@ function stringToHexArray(str) {
         arr.push(utf8Str.charCodeAt(i)); // 获取字符的 ASCII 码 (即十六进制值)
     }
     return arr;
-}
-
-function generateRandom5ByteVarint() {
-    let res = [];
-
-    // 前 4 个字节：最高位(bit 7)必须是 1，低 7 位随机
-    for (let i = 0; i < 4; i++) {
-        let random7Bit = Math.floor(Math.random() * 128);
-        res.push(random7Bit | 0x80); // 强制设置最高位为 1
-    }
-
-    // 第 5 个字节：最高位必须是 0，为了确保不变成 4 字节，低 7 位不能全为 0
-    let lastByte = Math.floor(Math.random() * 127) + 1;
-    res.push(lastByte & 0x7F); // 确保最高位为 0
-
-    return res;
 }
 
 // 拦截 Protobuf 编码逻辑，注入自定义 Payload
@@ -446,11 +398,10 @@ function attachProto() {
             const randomId8 = [0xC0, 0x01, 0x3A]
             const aesKey1Header = [0xCA, 0x01, 0x20]
             const aesKey1 = stringToHexArray(globalAesKey1)
-            const aesKey2Header = [0xDA, 0x01, 0x20]
-            const aesKey2 = stringToHexArray(globalAesKey2)
+            const md5Header = [0xDA, 0x01, 0x20]
+            const me5Key = stringToHexArray(globalMd5Key)
 
             const randomId9 = [0xE0, 0x01, 0xd9, 0xe7, 0xc7, 0xF3, 0x02]
-
 
             var left0 = [
                 0xF0, 0x01, 0x00, 0xA0, 0x02, 0x00, // 0x3E0
@@ -460,7 +411,7 @@ function attachProto() {
             const finalPayload = type.concat(msgId, cpHeader, cp, randomId, sysHeader, sys, msgIdHeader, receiverMsgId,
                 senderHeader, sender, receiverHeader, receiver, randomId1, type1, randomId2, randomId3, randomId4, htmlHeader, html,
                 cdnHeader, cdn, cdn2Header, cdn2, aesKeyHeader, aesKey, randomId5, cdn3Header, cdn3, randomId6, randomId7, randomId8,
-                aesKey1Header, aesKey1, aesKey2Header, aesKey2, randomId9, left0)
+                aesKey1Header, aesKey1, md5Header, me5Key, randomId9, left0)
 
             console.log("[+] Payload 准备写入");
             // dumpMemoryToHex(this.context.x1, 1024)
@@ -499,183 +450,6 @@ function toVarint(n) {
     return res;
 }
 
-function setReceiver() {
-    console.log("[+] buf2RespAddr WeChat Base: " + baseAddr + "[+] Attaching to: " + buf2RespAddr);
-
-    // 3. 开始拦截
-    Interceptor.attach(buf2RespAddr, {
-        onEnter: function (args) {
-            const currentPtr = this.context.x1;
-            let start = 0x1e;
-            let senderLen = currentPtr.add(start).readU8();
-            if (senderLen !== 0x14 && senderLen !== 0x13) {
-                start = 0x1d;
-                let senderLen = currentPtr.add(start).readU8();
-                if (senderLen !== 0x14 && senderLen !== 0x13) {
-                    return
-                }
-            }
-
-            let senderPtr = currentPtr.add(start + 1);
-            let sender = senderPtr.readUtf8String(senderLen);
-
-            let receiverLenPtr = senderPtr.add(senderLen).add(3);
-            let receiverLen = receiverLenPtr.readU8();
-            let receiverStrPtr = receiverLenPtr.add(1);
-            let receiver = receiverStrPtr.readUtf8String(receiverLen);
-
-            let contentLenPtr = receiverStrPtr.add(receiverLen).add(6);
-            if (isPrintableOrChinese(contentLenPtr, 1)) {
-                contentLenPtr = contentLenPtr.add(-1);
-            }
-            const contentLenValue = readVarint(contentLenPtr)
-            let contentPtr = contentLenPtr.add(contentLenValue.byteLength);
-            var content = contentPtr.readUtf8String(contentLenValue.value);
-
-            var selfId = receiver
-            var msgType = "private"
-            var groupId = ""
-            var senderUser = sender
-            var messages = [];
-            messages.push({type: "text", data: {text: content}});
-
-            if (sender.includes("@chatroom")) {
-                msgType = "group"
-                groupId = sender
-                let splitIndex = -1;
-                for (let i = 0; i < content.length; i++) {
-                    if (content[i] === ':') {
-                        splitIndex = i;
-                        break;
-                    }
-                }
-
-                senderUser = content.substring(0, splitIndex).trim();
-                content = content.substring(splitIndex + 2).trim();
-
-                messages = [];
-                const parts = content.split('\u2005');
-                for (let part of parts) {
-                    part = part.trim();
-                    if (!part.startsWith("@")) {
-                        messages.push({type: "text", data: {text: part}});
-                    }
-                }
-
-                const xmlPtr = contentPtr.add(contentLenValue.value).add(15);
-                const xmlLenValue = readVarint(xmlPtr)
-                const xml = xmlPtr.add(xmlLenValue.byteLength).readUtf8String(xmlLenValue.value);
-                const atUserMatch = xml.match(/<atuserlist>([\s\S]*?)<\/atuserlist>/);
-                const atUser = atUserMatch ? atUserMatch[1] : null;
-                if (atUser) {
-                    messages.push({type: "at", data: {qq: atUser}});
-                }
-            }
-
-            send({
-                message_type: msgType,
-                user_id: senderUser, // 发送人的 ID
-                self_id: selfId, // 接收人的 ID
-                group_id: groupId, // 群 ID
-                message_id: taskIdGlobal,
-                type: "send",
-                raw: {peerUid: taskIdGlobal},
-                message: messages
-            })
-        },
-    });
-}
-
-// 使用 setImmediate 确保在模块加载后执行
-setImmediate(setReceiver)
-
-function readVarint(addr) {
-    let value = 0;
-    let shift = 0;
-    let count = 0;
-
-    while (true) {
-        let byte = addr.add(count).readU8();
-        // 取低7位进行累加
-        value |= (byte & 0x7f) << shift;
-        count++; // 消耗了一个字节
-
-        // 如果最高位是0，跳出循环
-        if ((byte & 0x80) === 0) break;
-
-        shift += 7;
-        if (count > 5) return -1; // 安全校验，防止死循环
-    }
-
-    return {
-        value: value,      // 最终长度数值 (例如 251)
-        byteLength: count  // 长度字段占用的字节数 (例如 2)
-    };
-}
-
-function dumpMemoryToHex(ptr, size) {
-    try {
-        // 1. 读取内存数据
-        const buffer = ptr.readByteArray(size);
-        const data = new Uint8Array(buffer);
-
-        let output = "";
-        let line = "";
-
-        for (let i = 0; i < data.length; i++) {
-            // 格式化为 0x00 形式
-            const hex = "0x" + data[i].toString(16).padStart(2, '0').toUpperCase();
-            line += hex;
-
-            // 如果不是最后一个元素，添加逗号和空格
-            if (i < data.length - 1) {
-                line += ", ";
-            }
-
-            // 每 8 个字节输出一行
-            if ((i + 1) % 8 === 0 || i === data.length - 1) {
-                output += line + "\n";
-                line = "";
-            }
-        }
-
-        console.log("==================== MEMORY DUMP ====================");
-        console.log(output);
-        console.log("=====================================================");
-
-    } catch (e) {
-        console.log("[-] Dump 失败: " + e.message);
-    }
-}
-
-function isPrintableOrChinese(startPtr, maxScanLength) {
-    let offset = 0;
-    while (offset < maxScanLength) {
-        let b = startPtr.add(offset).readU8();
-
-        if (b === 0) {
-            // 扫描到 \0，且之前没有发现异常字节
-            return offset > 0; // 如果第一个就是 \0，视为非字符串（可能是空指针）
-        }
-
-        // 判定逻辑：
-        // 1. 可见 ASCII (32-126) 或 换行/制表符 (9, 10, 13)
-        let isAscii = (b >= 32 && b <= 126) || (b === 9 || b === 10 || b === 13);
-
-        // 2. 汉字 UTF-8 特征：第一个字节通常 >= 0x80 (128)
-        // 严谨点：UTF-8 汉字首字节通常在 0xE4-0xE9 之间，后续字节在 0x80-0xBF 之间
-        // 这里简化处理：如果是高位字符，我们暂时放行，由 readUtf8String 最终处理
-        let isHighBit = (b >= 0x80);
-
-        if (!isAscii && !isHighBit) {
-            // 发现既不是 ASCII 也不是高位字节（如 0x01-0x1F 的控制字符），判定为指针
-            return false;
-        }
-        offset++;
-    }
-    return true;
-}
-
 function patchCdnOnComplete() {
     Interceptor.attach(CndOnCompleteAddr, {
         onEnter: function (args) {
@@ -685,8 +459,8 @@ function patchCdnOnComplete() {
                 const x2 = this.context.x2;
                 globalImageCdnKey = x2.add(0x60).readPointer().readUtf8String();
                 globalAesKey1 = x2.add(0x78).readPointer().readUtf8String();
-                globalAesKey2 = x2.add(0x90).readPointer().readUtf8String();
-                console.log("[+] globalImageCdnKey: " + globalImageCdnKey + " globalAesKey1: " + globalAesKey1 + " globalAesKey2: " + globalAesKey2);
+                globalMd5Key = x2.add(0x90).readPointer().readUtf8String();
+                console.log("[+] globalImageCdnKey: " + globalImageCdnKey + " globalAesKey1: " + globalAesKey1 + " globalAesKey2: " + globalMd5Key);
             } catch (e) {
                 console.log("[-] Memory access error at onEnter: " + e);
             }
@@ -700,39 +474,29 @@ var uploadGlobalX0 = ptr(0)
 var uploadFunc1Addr = ptr(0)
 var uploadFunc2Addr = ptr(0)
 var imageIdAddr = ptr(0)
-var uploadAesKeyAddr1 = ptr(0)
-var uploadAesKeyAddr2 = ptr(0)
+var md5Addr = ptr(0)
+var uploadAesKeyAddr = ptr(0)
 var ImagePathAddr1 = ptr(0)
-var ImagePathAddr2 = ptr(0)
-var ImagePathAddr3 = ptr(0)
 var uploadImagePayload = ptr(0);
 
 function initMemo() {
     uploadFunc1Addr = Memory.alloc(24);
     uploadFunc2Addr = Memory.alloc(24);
     imageIdAddr = Memory.alloc(256);
-    uploadAesKeyAddr1 = Memory.alloc(256);
-    uploadAesKeyAddr2 = Memory.alloc(256);
+    md5Addr = Memory.alloc(256);
+    uploadAesKeyAddr = Memory.alloc(256);
     ImagePathAddr1 = Memory.alloc(256);
-    ImagePathAddr2 = Memory.alloc(256);
-    ImagePathAddr3 = Memory.alloc(256);
     uploadImagePayload = Memory.alloc(512);
 
 
     uploadFunc1Addr.writePointer(baseAddr.add(0x802b8b0));
     uploadFunc2Addr.writePointer(baseAddr.add(0x7fd5908));
-    patchHex(imageIdAddr, "77 78 69 64 5F 37 77 64 31 65 63 65 39 39 66 37 69 32 31 5F 31 37 36 38 32 37 34 36 36 37 5F 32 33 32 5F 31");
-    patchHex(uploadAesKeyAddr1, "37 65 61 34 31 64 35 36 39 66 37 30 35 33 35 37 37 38 30 39 36 38 65 39 31 30 34 32 38 34 63 66")
-    patchHex(uploadAesKeyAddr2, "65 63 64 35 37 65 39 63 66 38 35 66 32 65 32 30 38 37 61 65 65 38 63 30 66 64 31 65 34 34 35 65")
-    patchHex(ImagePathAddr1, "2F 55 73 65 72 73 2F 79 69 6E 63 6F 6E 67 2F 4C 69 62 72 61 72 79 2F 43 6F 6E 74 61 69 6E 65 72 73 2F 63 6F 6D 2E 74 65 6E 63 65 6E 74 2E 78 69 6E 57 65 43 68 61 74 2F 44 61 74 61 2F 44 6F 63 75 6D 65 6E 74 73 2F 78 77 65 63 68 61 74 5F 66 69 6C 65 73 2F 77 78 69 64 5F 6C 64 66 74 75 68 65 33 36 69 7A 67 31 39 5F 35 65 37 64 2F 74 65 6D 70 2F 30 34 65 62 61 61 62 37 65 33 65 61 36 30 35 30 65 32 36 66 66 33 31 64 38 39 63 63 31 32 31 65 2F 32 30 32 36 2D 30 31 2F 49 6D 67 2F 32 33 32 5F 31 37 36 38 32 37 33 36 36 37 2E 6A 70 67");
-    patchHex(ImagePathAddr2, "2F 55 73 65 72 73 2F 79 69 6E 63 6F 6E 67 2F 4C 69 62 72 61 72 79 2F 43 6F 6E 74 61 69 6E 65 72 73 2F 63 6F 6D 2E 74 65 6E 63 65 6E 74 2E 78 69 6E 57 65 43 68 61 74 2F 44 61 74 61 2F 44 6F 63 75 6D 65 6E 74 73 2F 78 77 65 63 68 61 74 5F 66 69 6C 65 73 2F 77 78 69 64 5F 6C 64 66 74 75 68 65 33 36 69 7A 67 31 39 5F 35 65 37 64 2F 74 65 6D 70 2F 30 34 65 62 61 61 62 37 65 33 65 61 36 30 35 30 65 32 36 66 66 33 31 64 38 39 63 63 31 32 31 65 2F 32 30 32 36 2D 30 31 2F 49 6D 67 2F 32 33 32 5F 31 37 36 38 32 37 33 36 36 37 2E 6A 70 67");
-    patchHex(ImagePathAddr3, "2F 55 73 65 72 73 2F 79 69 6E 63 6F 6E 67 2F 4C 69 62 72 61 72 79 2F 43 6F 6E 74 61 69 6E 65 72 73 2F 63 6F 6D 2E 74 65 6E 63 65 6E 74 2E 78 69 6E 57 65 43 68 61 74 2F 44 61 74 61 2F 44 6F 63 75 6D 65 6E 74 73 2F 78 77 65 63 68 61 74 5F 66 69 6C 65 73 2F 77 78 69 64 5F 6C 64 66 74 75 68 65 33 36 69 7A 67 31 39 5F 35 65 37 64 2F 74 65 6D 70 2F 30 34 65 62 61 61 62 37 65 33 65 61 36 30 35 30 65 32 36 66 66 33 31 64 38 39 63 63 31 32 31 65 2F 32 30 32 36 2D 30 31 2F 49 6D 67 2F 32 33 32 5F 31 37 36 38 32 37 33 36 36 37 2E 6A 70 67");
 }
 
 setImmediate(initMemo)
 
 
-function manualUpload() {
+function manualUpload(receiver, md5, imagePath) {
 
     const payload = [
         0x20, 0x05, 0x33, 0x8C, 0x0B, 0x00, 0x00, 0x00, // 函数 10802b8b0 的指针
@@ -819,15 +583,21 @@ function manualUpload() {
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 // 0x288
     ]
 
+    patchString(imageIdAddr, receiver + "_" + String(Math.floor(Date.now() / 1000)) + "_" + Math.floor(Math.random() * 1001) + "_1");
+    patchString(md5Addr, md5)
+    patchString(uploadAesKeyAddr, generateAESKey())
+    patchString(ImagePathAddr1, imagePath);
+
     uploadImagePayload.writeByteArray(payload);
     uploadImagePayload.writePointer(uploadFunc1Addr);
     uploadImagePayload.add(0x08).writePointer(uploadFunc2Addr);
     uploadImagePayload.add(0x48).writePointer(imageIdAddr);
-    uploadImagePayload.add(0xa8).writePointer(uploadAesKeyAddr1);
+    uploadImagePayload.add(0x68).writeUtf8String(receiver);
+    uploadImagePayload.add(0xa8).writePointer(md5Addr);
     uploadImagePayload.add(0xe0).writePointer(ImagePathAddr1);
-    uploadImagePayload.add(0x110).writePointer(ImagePathAddr2);
-    uploadImagePayload.add(0x140).writePointer(ImagePathAddr3);
-    uploadImagePayload.add(0x1f8).writePointer(uploadAesKeyAddr2);
+    uploadImagePayload.add(0x110).writePointer(ImagePathAddr1);
+    uploadImagePayload.add(0x140).writePointer(ImagePathAddr1);
+    uploadImagePayload.add(0x1f8).writePointer(uploadAesKeyAddr);
 
 
     const targetAddr = baseAddr.add(0x45DC834);
@@ -850,6 +620,26 @@ function attachUploadMedia() {
 }
 
 setImmediate(attachUploadMedia);
+
+
+function patchString(addr, plainStr) {
+    const bytes = [];
+    for (let i = 0; i < plainStr.length; i++) {
+        bytes.push(plainStr.charCodeAt(i));
+    }
+
+    addr.writeByteArray(bytes);
+    addr.add(bytes.length).writeU8(0);
+}
+
+function generateAESKey() {
+    const chars = 'abcdef0123456789';
+    let key = '';
+    for (let i = 0; i < 32; i++) {
+        key += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return key;
+}
 
 
 rpc.exports = {
